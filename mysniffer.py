@@ -6,6 +6,7 @@ http, telnet, ftp, tcp, udp
 """
 
 import os
+import re
 import socket
 import struct
 import sys
@@ -34,6 +35,10 @@ UDP_HEAD_LEN = 8
 
 TCP_PROTOCOL_NUM = 6
 UDP_PROTOCOL_NUM = 17
+
+
+HTTP_PATTERN = re.compile(
+    r"((GET|POST|UPDATE|DELETE|PUT) [a-zA-Z0-9\/\.]+ HTTP\/.\..)|(HTTP\/.\.. [0-9]{3} [A-Z]+)")
 
 
 def isvalidIp(ip_addr):
@@ -215,20 +220,28 @@ def keepNetworkPacket(trans_proto):
 
     if trans_proto not in ("TCP", "UDP"):
         return False
-    return True
+    if PROTOCOL not in ("TCP", "UDP"):
+        return True
+
+    if trans_proto == "TCP" and PROTOCOL == "TCP":
+        return True
+    elif trans_proto == "UDP" and PROTOCOL == "UDP":
+        return True
+    return False
 
 
-def keepTransportPacket(proto, s_port, d_port):
+def keepTransportPacket(proto, s_port, d_port, trans_data_peek):
     """Only keep packets adhering to following table:
 
-    HTTP:   (80)
+    HTTP:   (If first 30 bytes matches the HTTP req/res pattern)
     FTP:    (20, 21)
     Telnet: (23)
     """
 
-    if PROTOCOL:
+    if PROTOCOL in ("HTTP", "FTP", "TELNET"):
         if PROTOCOL == "HTTP" and proto == "TCP" and \
-                80 in (s_port, d_port):
+                trans_data_peek.isascii() and \
+                HTTP_PATTERN.match(trans_data_peek.decode()):
             return True
 
         elif PROTOCOL == "FTP" and proto == "TCP" and \
@@ -263,11 +276,8 @@ def parsePacket(packet):
     transport_protocol, ip_header, ip_payload, dst_ip_addr, trans_proto = \
         extractIpPayload(eth_payload)
 
-    # print(trans_proto)
-
     if DST_IP_ADDR and dst_ip_addr != DST_IP_ADDR:
         return
-    # print(f"Hit: {dst_ip_addr}")
 
     # if protocol filter is specified
     if not keepNetworkPacket(trans_proto):
@@ -294,7 +304,7 @@ def parsePacket(packet):
     # ------------------------ HTTP/FTP/TELNET FILTERING -----------------------
 
     # if protocol filter is specified
-    if not keepTransportPacket(trans_proto, src_port, dst_port):
+    if not keepTransportPacket(trans_proto, src_port, dst_port, trans_payload[:30]):
         return
 
     # ------------------------------- PRINT DATA -------------------------------
